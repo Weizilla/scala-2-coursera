@@ -1,7 +1,5 @@
 package example
 
-import common._
-
 object Lists {
   /**
   * This method computes the sum of all elements in the list xs. There are
@@ -23,8 +21,17 @@ object Lists {
   * @param xs A list of natural numbers
   * @return The sum of all elements in `xs`
   */
-    def sum(xs: List[Int]): Int = ???
-  
+  def sum(xs: List[Int]): Int = {
+    sumRec(xs, 0)
+  }
+
+  def sumRec(xs: List[Int], sum: Int): Int = {
+    xs match {
+      case head :: tail => sumRec(tail, head + sum)
+      case Nil => sum
+    }
+  }
+
   /**
   * This method returns the largest element in a list of integers. If the
   * list `xs` is empty it throws a `java.util.NoSuchElementException`.
@@ -38,5 +45,14 @@ object Lists {
   * @return The largest element in `xs`
   * @throws java.util.NoSuchElementException if `xs` is an empty list
   */
-    def max(xs: List[Int]): Int = ???
+  def max(xs: List[Int]): Int = {
+    maxRec(xs, Int.MinValue)
   }
+
+  def maxRec(xs: List[Int], max: Int): Int = {
+    xs match {
+      case head :: tail => maxRec(tail, if (head > max) head else max)
+      case Nil => max
+    }
+  }
+}
