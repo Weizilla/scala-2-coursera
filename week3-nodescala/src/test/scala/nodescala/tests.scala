@@ -63,6 +63,7 @@ class NodeScalaSuite extends FunSuite {
       Future {
         while (ct.nonCancelled) {
           println("working")
+          Thread.sleep(1000)
         }
         println("done")
       }

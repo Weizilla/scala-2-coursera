@@ -74,7 +74,9 @@ package object nodescala {
     /** Creates a cancellable context for an execution and runs it.
      */
     def run()(f: CancellationToken => Future[Unit]): Subscription = {
-      CancellationTokenSource()
+      val c = CancellationTokenSource()
+      f(c.cancellationToken)
+      c
     }
 
   }
@@ -92,7 +94,11 @@ package object nodescala {
      *  depending on the current state of the `Future`.
      */
     def now: T = {
-      Await.result(f, 0 nano)
+      if (f.isCompleted) {
+        f.value.get.get
+      } else {
+        throw new NoSuchElementException()
+      }
     }
 
     /** Continues the computation of this future by taking the current future
@@ -102,12 +108,6 @@ package object nodescala {
      *  The resulting future contains a value returned by `cont`.
      */
     def continueWith[S](cont: Future[T] => S): Future[S] = {
-//      val promise = Promise[S]()
-//      f onComplete {
-//        case Success(s) => cont(Future.always)
-//        case Failure(e) => promise.failure(e)
-//      }
-//      promise.future
       Future[S](cont(f))
     }
 
@@ -118,7 +118,9 @@ package object nodescala {
      *  The resulting future contains a value returned by `cont`.
      */
     def continue[S](cont: Try[T] => S): Future[S] = {
-      Future[S](cont(f.value.get))
+      val p = Promise[S]()
+      f.onComplete(t => p.complete(Try[S](cont(t))))
+      p.future
     }
 
   }
