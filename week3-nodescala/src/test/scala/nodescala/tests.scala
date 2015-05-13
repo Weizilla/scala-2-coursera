@@ -1,16 +1,15 @@
 package nodescala
 
-import scala.language.postfixOps
-import scala.util.{Try, Success, Failure}
+import nodescala.NodeScala._
+import org.junit.runner.RunWith
+import org.scalatest._
+import org.scalatest.junit.JUnitRunner
+
 import scala.collection._
 import scala.concurrent._
 import ExecutionContext.Implicits.global
 import scala.concurrent.duration._
-import scala.async.Async.{async, await}
-import org.scalatest._
-import NodeScala._
-import org.junit.runner.RunWith
-import org.scalatest.junit.JUnitRunner
+import scala.language.postfixOps
 
 @RunWith(classOf[JUnitRunner])
 class NodeScalaSuite extends FunSuite {
@@ -31,8 +30,48 @@ class NodeScalaSuite extends FunSuite {
     }
   }
 
-  
-  
+  test("any future which finishes") {
+    val any = Future.any(List(
+      Future {
+        1
+      }, Future {
+        2
+      }, Future {
+        3
+      }
+    ))
+    val result = Await.result(any, 1 second)
+    assert(result == 1 || result == 2 || result == 3)
+  }
+
+  test("all finishes") {
+    val all = Future.all(List(
+      Future {
+        1
+      }, Future {
+        2
+      }, Future {
+        3
+      }
+    ))
+    val result = Await.result(all, 1 second)
+    assert(result == List(1, 2, 3))
+  }
+
+  test("unsubscribe") {
+    val working = Future.run() { ct =>
+      Future {
+        while (ct.nonCancelled) {
+          println("working")
+        }
+        println("done")
+      }
+    }
+    Future.delay(5 seconds) onSuccess {
+      case _ => working.unsubscribe()
+    }
+  }
+
   class DummyExchange(val request: Request) extends Exchange {
     @volatile var response = ""
     val loaded = Promise[String]()
