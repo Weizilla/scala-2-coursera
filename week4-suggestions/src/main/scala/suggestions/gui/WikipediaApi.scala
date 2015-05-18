@@ -7,8 +7,8 @@ import suggestions.observablex._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
 import scala.language.postfixOps
-import scala.util.Try
-
+import scala.util.{Failure, Try}
+import scala.concurrent.duration._
 trait WikipediaApi {
 
   /** Returns a `Future` with a list of possible completions for a search `term`.
@@ -46,7 +46,9 @@ trait WikipediaApi {
      *
      * E.g. `1, 2, 3, !Exception!` should become `Success(1), Success(2), Success(3), Failure(Exception), !TerminateStream!`
      */
-    def recovered: Observable[Try[T]] = ???
+    def recovered: Observable[Try[T]] = {
+      obs.map(t => Try[T](t)).onErrorResumeNext(e => Observable.just(Failure[T](e)))
+    }
 
     /** Emits the events from the `obs` observable, until `totalSec` seconds have elapsed.
      *
@@ -54,7 +56,9 @@ trait WikipediaApi {
      *
      * Note: uses the existing combinators on observables.
      */
-    def timedOut(totalSec: Long): Observable[T] = ???
+    def timedOut(totalSec: Long): Observable[T] = {
+      obs.take(totalSec.seconds)
+    }
 
     /** Given a stream of events `obs` and a method `requestMethod` to map a request `T` into
      * a stream of responses `S`, returns a stream of all the responses wrapped into a `Try`.
