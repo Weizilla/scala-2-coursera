@@ -1,17 +1,13 @@
 package suggestions
 package gui
 
-import scala.language.postfixOps
-import scala.collection.mutable.ListBuffer
-import scala.collection.JavaConverters._
-import scala.concurrent._
-import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.{ Try, Success, Failure }
-import rx.subscriptions.CompositeSubscription
 import rx.lang.scala.Observable
-import observablex._
-import search._
+import suggestions.observablex._
+
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent._
+import scala.language.postfixOps
+import scala.util.Try
 
 trait WikipediaApi {
 
@@ -37,7 +33,9 @@ trait WikipediaApi {
      *
      * E.g. `"erik", "erik meijer", "martin` should become `"erik", "erik_meijer", "martin"`
      */
-    def sanitized: Observable[String] = ???
+    def sanitized: Observable[String] = {
+      obs.map(_.replace(" ", "_"))
+    }
 
   }
 
