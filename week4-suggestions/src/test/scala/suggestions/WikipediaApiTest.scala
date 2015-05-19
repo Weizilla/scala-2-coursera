@@ -71,6 +71,14 @@ class WikipediaApiTest extends FunSuite {
 //    readLine()
   }
 
+  test("concat recovered") {
+    val requests = Observable.just(1, 2, 3, 4, 5)
+    def rm(num: Int): Observable[Int] = {
+      if (num != 4) Observable.just(num) else Observable.error(new Exception)
+    }
+    requests.concatRecovered(rm).toList.foreach(println(_))
+  }
+
   test("WikipediaApi should correctly use concatRecovered") {
     val requests = Observable.just(1, 2, 3)
     val remoteComputation = (n: Int) => Observable.just(0 to n : _*)

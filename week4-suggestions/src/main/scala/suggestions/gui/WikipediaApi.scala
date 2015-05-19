@@ -6,9 +6,9 @@ import suggestions.observablex._
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
+import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.util.{Failure, Try}
-import scala.concurrent.duration._
 trait WikipediaApi {
 
   /** Returns a `Future` with a list of possible completions for a search `term`.
@@ -21,11 +21,11 @@ trait WikipediaApi {
 
   /** Returns an `Observable` with a list of possible completions for a search `term`.
    */
-  def wikiSuggestResponseStream(term: String): Observable[List[String]] = ObservableEx(wikipediaSuggestion(term)).timedOut(1L)
+  def wikiSuggestResponseStream(term: String): Observable[List[String]] = ObservableEx(wikipediaSuggestion(term)).timedOut(5L)
 
   /** Returns an `Observable` with the contents of the Wikipedia page for the given search `term`.
    */
-  def wikiPageResponseStream(term: String): Observable[String] = ObservableEx(wikipediaPage(term)).timedOut(1L)
+  def wikiPageResponseStream(term: String): Observable[String] = ObservableEx(wikipediaPage(term)).timedOut(5L)
 
   implicit class StringObservableOps(obs: Observable[String]) {
 
@@ -47,7 +47,7 @@ trait WikipediaApi {
      * E.g. `1, 2, 3, !Exception!` should become `Success(1), Success(2), Success(3), Failure(Exception), !TerminateStream!`
      */
     def recovered: Observable[Try[T]] = {
-      obs.map(t => Try[T](t)).onErrorResumeNext(e => Observable.just(Failure[T](e)))
+      obs.map(t => Try[T](t)).onErrorReturn(e => Failure[T](e))
     }
 
     /** Emits the events from the `obs` observable, until `totalSec` seconds have elapsed.
@@ -85,7 +85,9 @@ trait WikipediaApi {
      *
      * Observable(Success(1), Succeess(1), Succeess(1), Succeess(2), Succeess(2), Succeess(2), Succeess(3), Succeess(3), Succeess(3))
      */
-    def concatRecovered[S](requestMethod: T => Observable[S]): Observable[Try[S]] = ???
+    def concatRecovered[S](requestMethod: T => Observable[S]): Observable[Try[S]] = {
+      obs.flatMap(t => requestMethod(t).recovered)
+    }
 
   }
 
