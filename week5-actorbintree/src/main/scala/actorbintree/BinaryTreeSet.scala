@@ -4,6 +4,7 @@
 package actorbintree
 
 import akka.actor._
+
 import scala.collection.immutable.Queue
 
 object BinaryTreeSet {
@@ -43,7 +44,7 @@ object BinaryTreeSet {
     * `result` is true if and only if the element is present in the tree.
     */
   case class ContainsResult(id: Int, result: Boolean) extends OperationReply
-  
+
   /** Message to signal successful completion of an insert or remove operation. */
   case class OperationFinished(id: Int) extends OperationReply
 
@@ -52,7 +53,6 @@ object BinaryTreeSet {
 
 class BinaryTreeSet extends Actor {
   import BinaryTreeSet._
-  import BinaryTreeNode._
 
   def createRoot: ActorRef = context.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true))
 
@@ -66,7 +66,10 @@ class BinaryTreeSet extends Actor {
 
   // optional
   /** Accepts `Operation` and `GC` messages. */
-  val normal: Receive = { case _ => ??? }
+  val normal: Receive = {
+    case GC =>  ???
+    case m => root forward m
+  }
 
   // optional
   /** Handles messages while garbage collection is performed.
@@ -101,7 +104,27 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
 
   // optional
   /** Handles `Operation` messages and `CopyTo` requests. */
-  val normal: Receive = { case _ => ??? }
+  val normal: Receive = {
+    case c:Contains if c.elem < elem && subtrees.contains(Left) => subtrees(Left) ! c
+    case c:Contains if c.elem > elem && subtrees.contains(Right) => subtrees(Right) ! c
+    case r:Remove if r.elem < elem && subtrees.contains(Left) => subtrees(Left) ! r
+    case r:Remove if r.elem > elem && subtrees.contains(Right) => subtrees(Right) ! r
+    case Contains(actor, id, e) =>  actor ! ContainsResult(id, e == elem && ! removed)
+    case Insert(actor, id, e) => {
+      if (e < elem) {
+        val newActor: ActorRef = context.actorOf(props(e, false))
+        subtrees += Left -> newActor
+      } else if (e > elem) {
+        val newActor: ActorRef = context.actorOf(props(e, false))
+        subtrees += Right -> newActor
+      }
+      actor ! OperationFinished(id)
+    }
+    case Remove(actor, id, e) => {
+      removed = e == elem
+      actor ! OperationFinished(id)
+    }
+  }
 
   // optional
   /** `expected` is the set of ActorRefs whose replies we are waiting for,

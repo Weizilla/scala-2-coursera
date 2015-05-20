@@ -3,22 +3,16 @@
  */
 package actorbintree
 
-import akka.actor.{ Props, ActorRef, ActorSystem }
-import org.scalatest.{ BeforeAndAfterAll, FlatSpec }
-import akka.testkit.{ TestProbe, ImplicitSender, TestKit }
-import org.scalatest.Matchers
-import scala.util.Random
+import actorbintree.BinaryTreeSet.{Operation, OperationReply}
+import akka.actor.{ActorRef, ActorSystem, Props}
+import akka.testkit.{ImplicitSender, TestKit, TestProbe}
+import org.scalatest.{BeforeAndAfterAll, FunSuiteLike, Matchers}
+
 import scala.concurrent.duration._
-import org.scalatest.FunSuiteLike
+import scala.util.Random
 
-class BinaryTreeSuite(_system: ActorSystem) extends TestKit(_system) with FunSuiteLike with Matchers with BeforeAndAfterAll with ImplicitSender
-{
-
-  def this() = this(ActorSystem("BinaryTreeSuite"))
-
-  override def afterAll: Unit = system.shutdown()
-
-  import actorbintree.BinaryTreeSet._
+class Tester(_system: ActorSystem) extends TestKit(_system) with FunSuiteLike with
+Matchers with BeforeAndAfterAll with ImplicitSender {
 
   def receiveN(requester: TestProbe, ops: Seq[Operation], expectedReplies: Seq[OperationReply]): Unit =
     requester.within(5.seconds) {
@@ -26,7 +20,7 @@ class BinaryTreeSuite(_system: ActorSystem) extends TestKit(_system) with FunSui
         requester.expectMsgType[OperationReply]
       } catch {
         case ex: Throwable if ops.size > 10 => fail(s"failure to receive confirmation $i/${ops.size}", ex)
-        case ex: Throwable                  => fail(s"failure to receive confirmation $i/${ops.size}\nRequests:" + ops.mkString("\n    ", "\n     ", ""), ex)
+        case ex: Throwable => fail(s"failure to receive confirmation $i/${ops.size}\nRequests:" + ops.mkString("\n    ", "\n     ", ""), ex)
       }
       val replies = repliesUnsorted.sortBy(_.id)
       if (replies != expectedReplies) {
@@ -45,6 +39,26 @@ class BinaryTreeSuite(_system: ActorSystem) extends TestKit(_system) with FunSui
     receiveN(probe, ops, expected)
     // the grader also verifies that enough actors are created
   }
+
+  def verify(node: ActorRef, probe: TestProbe, ops: Seq[Operation], expected: Seq[OperationReply]): Unit = {
+
+    ops foreach { op =>
+      node ! op
+    }
+
+    receiveN(probe, ops, expected)
+    // the grader also verifies that enough actors are created
+  }
+}
+
+class BinaryTreeSuite(_system: ActorSystem) extends Tester(_system)
+{
+
+  def this() = this(ActorSystem("BinaryTreeSuite"))
+
+  override def afterAll: Unit = system.shutdown()
+
+  import actorbintree.BinaryTreeSet._
 
   test("proper inserts and lookups") {
     val topNode = system.actorOf(Props[BinaryTreeSet])
