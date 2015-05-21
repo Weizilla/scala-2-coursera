@@ -14,12 +14,15 @@ import scala.util.Random
 class Tester(_system: ActorSystem) extends TestKit(_system) with FunSuiteLike with
 Matchers with BeforeAndAfterAll with ImplicitSender {
 
-  def receiveN(requester: TestProbe, ops: Seq[Operation], expectedReplies: Seq[OperationReply]): Unit =
+  def receiveN(requester: TestProbe, ops: Seq[Any], expectedReplies: Seq[Any]): Unit =
     requester.within(5.seconds) {
       val repliesUnsorted = for (i <- 1 to ops.size) yield try {
         requester.expectMsgType[OperationReply]
       } catch {
-        case ex: Throwable if ops.size > 10 => fail(s"failure to receive confirmation $i/${ops.size}", ex)
+        case ex: Throwable if ops.size > 10 => {
+          ops.foreach(println)
+          fail(s"failure to receive confirmation $i/${ops.size}", ex)
+        }
         case ex: Throwable => fail(s"failure to receive confirmation $i/${ops.size}\nRequests:" + ops.mkString("\n    ", "\n     ", ""), ex)
       }
       val replies = repliesUnsorted.sortBy(_.id)
@@ -40,7 +43,7 @@ Matchers with BeforeAndAfterAll with ImplicitSender {
     // the grader also verifies that enough actors are created
   }
 
-  def verify(node: ActorRef, probe: TestProbe, ops: Seq[Operation], expected: Seq[OperationReply]): Unit = {
+  def verify(node: ActorRef, probe: TestProbe, ops: Seq[Any], expected: Seq[Any]): Unit = {
 
     ops foreach { op =>
       node ! op

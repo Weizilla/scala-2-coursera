@@ -1,5 +1,6 @@
 package actorbintree
 
+import actorbintree.BinaryTreeNode.{CopyFinished, CopyTo}
 import actorbintree.BinaryTreeSet.{Remove, Contains, ContainsResult, Insert, OperationFinished}
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.TestProbe
@@ -63,5 +64,36 @@ class BinaryTreeNodeSuite(_system: ActorSystem) extends Tester (_system)
     )
 
     verify(node, probe, ops, expected)
+  }
+
+  test("copy") {
+    val oldNode = system.actorOf(Props(classOf[BinaryTreeNode], 1, false))
+    val newNode = system.actorOf(Props(classOf[BinaryTreeNode], 1, false))
+    val probe = TestProbe()
+
+    val newElement = 2
+
+    val oldNodeOps = List(
+      Insert(probe.ref, 1, newElement),
+      Contains(probe.ref, 2, newElement),
+      CopyTo(probe.ref,newNode)
+    )
+
+    val oldNodeExpected = List(
+      OperationFinished(1),
+      ContainsResult(2, true),
+      CopyFinished
+    )
+
+    val newNodeOps = List(
+      Contains(probe.ref, 4, newElement)
+    )
+
+    val newNodeExpected = List(
+      ContainsResult(4, true)
+    )
+
+    verify(oldNode, probe, oldNodeOps, oldNodeExpected)
+    verify(newNode, probe, newNodeOps, newNodeExpected)
   }
 }
