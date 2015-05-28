@@ -4,10 +4,21 @@ import actorbintree.BinaryTreeNode.{CopyFinished, CopyTo}
 import actorbintree.BinaryTreeSet.{Remove, Contains, ContainsResult, Insert, OperationFinished}
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.TestProbe
+import com.typesafe.config.ConfigFactory
 
 class BinaryTreeNodeSuite(_system: ActorSystem) extends Tester (_system)
 {
-  def this() = this(ActorSystem("BinaryTreeNodeSuite"))
+//  def this() = this(ActorSystem("BinaryTreeNodeSuite"))
+    def this() = this(ActorSystem("BinaryTreeNodeSuite",
+  ConfigFactory.parseString( """akka {
+           loglevel = "DEBUG"
+           actor {
+             debug {
+               receive = on
+               lifecycle = off
+             }
+           }
+         }""").withFallback(ConfigFactory.load())))
 
   test("contains") {
     val node = system.actorOf(Props(classOf[BinaryTreeNode], 1, false))
@@ -28,7 +39,7 @@ class BinaryTreeNodeSuite(_system: ActorSystem) extends Tester (_system)
     val node = system.actorOf(Props(classOf[BinaryTreeNode], 1, false))
     val probe = TestProbe()
 
-    val newElement = 2
+    val newElement = 42
 
     val ops = List(
       Insert(probe.ref, id = 1, newElement),
@@ -67,22 +78,22 @@ class BinaryTreeNodeSuite(_system: ActorSystem) extends Tester (_system)
   }
 
   test("copy") {
-    val oldNode = system.actorOf(Props(classOf[BinaryTreeNode], 1, false))
-    val newNode = system.actorOf(Props(classOf[BinaryTreeNode], 1, false))
+    val oldNode = system.actorOf(Props(classOf[BinaryTreeNode], 1, false), "old")
+    val newNode = system.actorOf(Props(classOf[BinaryTreeNode], 1, false), "new")
     val probe = TestProbe()
 
-    val newElement = 2
+    val newElement = 42
 
     val oldNodeOps = List(
       Insert(probe.ref, 1, newElement),
       Contains(probe.ref, 2, newElement),
-      CopyTo(probe.ref,newNode)
+      CopyTo(probe.ref, 3,newNode)
     )
 
     val oldNodeExpected = List(
       OperationFinished(1),
       ContainsResult(2, true),
-      CopyFinished
+      CopyFinished(3)
     )
 
     val newNodeOps = List(

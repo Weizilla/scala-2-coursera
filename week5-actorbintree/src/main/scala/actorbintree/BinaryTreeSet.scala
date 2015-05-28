@@ -4,7 +4,9 @@
 package actorbintree
 
 import actorbintree.BinaryTreeNode.{CopyFinished, CopyTo}
+import actorbintree.BinaryTreeSet.OperationReply
 import akka.actor._
+import akka.event.LoggingReceive
 
 import scala.collection.immutable.Queue
 
@@ -55,7 +57,8 @@ object BinaryTreeSet {
 class BinaryTreeSet extends Actor {
   import BinaryTreeSet._
 
-  def createRoot: ActorRef = context.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true))
+  def createRoot: ActorRef = context.actorOf(BinaryTreeNode.props(0, initiallyRemoved = true),
+    "root-" + System.currentTimeMillis())
 
   var root = createRoot
 
@@ -70,7 +73,7 @@ class BinaryTreeSet extends Actor {
   val normal: Receive = {
     case GC =>  {
       val newRoot = createRoot
-      root ! CopyTo(self, newRoot)
+      root ! CopyTo(self, (math.random * 1000).toInt, newRoot)
       context.become(garbageCollecting(newRoot))
     }
     case m => root forward m
@@ -83,8 +86,9 @@ class BinaryTreeSet extends Actor {
     */
   def garbageCollecting(newRoot: ActorRef): Receive = {
     case m:Operation => pendingQueue = pendingQueue.enqueue(m)
-    case CopyFinished => {
+    case CopyFinished(_) => {
       root = newRoot
+      pendingQueue.foreach(self ! _)
       context.become(normal)
     }
   }
@@ -97,8 +101,8 @@ object BinaryTreeNode {
   case object Left extends Position
   case object Right extends Position
 
-  case class CopyTo(requester: ActorRef, treeNode: ActorRef)
-  case class CopyFinished(requester: ActorRef)
+  case class CopyTo(requester: ActorRef, id: Int, treeNode: ActorRef)
+  case class CopyFinished(id: Int) extends OperationReply
 
   def props(elem: Int, initiallyRemoved: Boolean) = Props(classOf[BinaryTreeNode],  elem, initiallyRemoved)
 }
@@ -115,62 +119,118 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor wit
 
   // optional
   /** Handles `Operation` messages and `CopyTo` requests. */
-  val normal: Receive = {
-    case c:Contains if c.elem < elem && subtrees.contains(Left) => subtrees(Left) ! c
-    case c:Contains if c.elem > elem && subtrees.contains(Right) => subtrees(Right) ! c
-    case r:Remove if r.elem < elem && subtrees.contains(Left) => subtrees(Left) ! r
-    case r:Remove if r.elem > elem && subtrees.contains(Right) => subtrees(Right) ! r
-    case Contains(actor, id, e) =>  actor ! ContainsResult(id, e == elem && ! removed)
-    case Insert(actor, id, e) => {
-      if (e < elem) {
-        val newActor: ActorRef = context.actorOf(props(e, false))
+  val normal: Receive = LoggingReceive {
+    case Remove(actor, id, e) => handleRemove(actor, id, e)
+    case Contains(actor, id, e) => handleContains(actor, id, e)
+    case Insert(actor, id, e) => handleInsert(actor, id, e)
+    case CopyTo(r, id,d) => handleCopyTo(r, id, d)
+  }
+
+  def handleCopyTo(r: ActorRef, id: Int, d: ActorRef): Unit = {
+    if (!removed) {
+      log.debug(s"Insert $elem to $d")
+      d ! Insert(self, (math.random * 1000).toInt, elem)
+    }
+    val newId = (math.random * 1000).toInt
+    subtrees.values.foreach {
+      a => {
+        log.debug(s"Copy $a to $d, id $newId")
+        a ! CopyTo(self, newId, d)
+      }
+    }
+
+    if (removed && subtrees.isEmpty) {
+      log.debug(s"Copy finished due to removed and empty")
+      r ! CopyFinished(id)
+    } else {
+      log.debug(s"Entering copying state $r")
+      context.become(copying(subtrees.values.toSet, removed, r, id))
+    }
+  }
+
+  def handleInsert(actor: ActorRef, id: Int, e: Int): Unit = {
+    if (e < elem) {
+      if (subtrees.contains(Left)) {
+        log.debug("Pass onto left actor " + subtrees(Left))
+        subtrees(Left) ! Insert(actor, id, e)
+      } else {
+        val newActor: ActorRef = context.actorOf(props(e, false), e.toString)
+        log.debug(s"Insert new left actor. $e < $elem $newActor")
         subtrees += Left -> newActor
-      } else if (e > elem) {
-        val newActor: ActorRef = context.actorOf(props(e, false))
+        actor ! OperationFinished(id)
+      }
+    } else if (e > elem) {
+      if (subtrees.contains(Right)) {
+        log.debug("Pass onto right actor " + subtrees(Right))
+        subtrees(Right) ! Insert(actor, id, e)
+      } else {
+        val newActor: ActorRef = context.actorOf(props(e, false), e.toString)
+        log.debug(s"Insert new right actor $e > $elem $newActor")
         subtrees += Right -> newActor
+        actor ! OperationFinished(id)
+      }
+    } else {
+      removed = false
+      actor ! OperationFinished(id)
+    }
+  }
+
+  def handleContains(actor: ActorRef, id: Int, e: Int): Unit = {
+    if (e < elem && subtrees.contains(Left)) {
+      log.debug("Pass contains to left actor: " + subtrees(Left))
+      subtrees(Left) ! Contains(actor, id, e)
+    } else if (e > elem && subtrees.contains(Right)) {
+      log.debug("Pass contains to right actor: " + subtrees(Right))
+      subtrees(Right) ! Contains(actor, id, e)
+    } else {
+      val result = e == elem && !removed
+      log.debug("Processing contains myself: " + result)
+      actor ! ContainsResult(id, result)
+    }
+  }
+
+  def handleRemove(actor: ActorRef, id: Int, e: Int): Unit = {
+    if (e < elem && subtrees.contains(Left)) {
+      subtrees(Left) ! Remove(actor, id, e)
+    } else if (e > elem && subtrees.contains(Right)) {
+      subtrees(Right) ! Remove(actor, id, e)
+    } else {
+      if (e == elem) {
+        removed = true
       }
       actor ! OperationFinished(id)
     }
-    case Remove(actor, id, e) => {
-      removed = e == elem
-      actor ! OperationFinished(id)
-    }
-    case CopyTo(r, d) => {
-      log.info("Copy to " + d + " sender: " + sender)
-      if (! removed) {
-        d ! Insert(self, 0, elem)
-        context.become(copying(subtrees.values.toSet, false, r))
+  }
+
+  /** `expected` is the set of ActorRefs whose replies we are waiting for,
+    * `insertConfirmed` tracks whether the copy of this node to the new tree has been confirmed.
+    */
+  def copying(expected: Set[ActorRef], insertConfirmed: Boolean, requestor: ActorRef, id: Int): Receive = {
+    case OperationFinished(_) => {
+      log.debug("Insert confirmed")
+      if (expected.isEmpty) {
+        requestor ! CopyFinished(id)
+        log.debug(s"Entering normal state. Copy finished to $requestor $id")
+        context.become(normal)
       } else {
-        r ! CopyFinished
+        log.debug(s"Continue copy state. Waiting for $expected")
+        context.become(copying(expected, true, requestor, id))
+      }
+    }
+    case CopyFinished(_) => {
+      val newExpected = expected - sender
+      log.debug(s"Copying finished from $sender. Remaining $newExpected")
+      if (newExpected.isEmpty && insertConfirmed) {
+        requestor ! CopyFinished(id)
+        log.debug(s"Entering normal state. Copy finished to $requestor $id")
+        context.become(normal)
+      } else {
+        log.debug(s"Continue copy state. Waiting for ${newExpected.isEmpty} $insertConfirmed")
+        context.become(copying(newExpected, insertConfirmed, requestor, id))
       }
     }
   }
 
-  // optional
-  /** `expected` is the set of ActorRefs whose replies we are waiting for,
-    * `insertConfirmed` tracks whether the copy of this node to the new tree has been confirmed.
-    */
-  def copying(expected: Set[ActorRef], insertConfirmed: Boolean, requester: ActorRef): Receive = {
-    case OperationFinished(_) => {
-      log.info("Copying op finished. " + sender)
-      if (expected.nonEmpty) {
-        expected.foreach(a => a ! CopyTo(self, sender))
-        context.become(copying(expected, true, requester))
-      } else {
-        requester ! CopyFinished
-      }
-    }
-    case CopyFinished => {
-      val newExpected = expected - sender
-      log.info("Copying copy finished: " + newExpected)
-      if (newExpected.isEmpty) {
-        log.info("Copying sending finished: " + requester)
-        requester ! CopyFinished
-      } else {
-        context.become(copying(newExpected, insertConfirmed, requester))
-      }
-    }
-  }
 
 
 }

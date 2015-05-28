@@ -6,6 +6,7 @@ package actorbintree
 import actorbintree.BinaryTreeSet.{Operation, OperationReply}
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
+import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSuiteLike, Matchers}
 
 import scala.concurrent.duration._
@@ -15,19 +16,28 @@ class Tester(_system: ActorSystem) extends TestKit(_system) with FunSuiteLike wi
 Matchers with BeforeAndAfterAll with ImplicitSender {
 
   def receiveN(requester: TestProbe, ops: Seq[Any], expectedReplies: Seq[Any]): Unit =
-    requester.within(5.seconds) {
-      val repliesUnsorted = for (i <- 1 to ops.size) yield try {
-        requester.expectMsgType[OperationReply]
-      } catch {
-        case ex: Throwable if ops.size > 10 => {
-          ops.foreach(println)
-          fail(s"failure to receive confirmation $i/${ops.size}", ex)
+    requester.within(10.seconds) {
+      val repliesUnsorted = for (i <- 1 to ops.size) yield {
+        try { {
+          requester.expectMsgType[OperationReply]
         }
-        case ex: Throwable => fail(s"failure to receive confirmation $i/${ops.size}\nRequests:" + ops.mkString("\n    ", "\n     ", ""), ex)
+        } catch {
+          case ex: Throwable if ops.size > 10 => {
+            {
+              ops.foreach(println)
+              fail(s"failure to receive confirmation $i/${ops.size}", ex)
+            }
+          }
+          case ex: Throwable => {
+            fail(s"failure to receive confirmation $i/${ops.size}\nRequests:" + ops.mkString("\n    ", "\n     ", ""), ex)
+          }
+        }
       }
       val replies = repliesUnsorted.sortBy(_.id)
       if (replies != expectedReplies) {
-        val pairs = (replies zip expectedReplies).zipWithIndex filter (x => x._1._1 != x._1._2)
+        val zipped = (replies zip expectedReplies).zipWithIndex
+//        zipped.foreach(println)
+        val pairs = zipped filter (x => x._1._1 != x._1._2)
         fail("unexpected replies:" + pairs.map(x => s"at index ${x._2}: got ${x._1._1}, expected ${x._1._2}").mkString("\n    ", "\n    ", ""))
       }
     }
@@ -57,7 +67,16 @@ Matchers with BeforeAndAfterAll with ImplicitSender {
 class BinaryTreeSuite(_system: ActorSystem) extends Tester(_system)
 {
 
-  def this() = this(ActorSystem("BinaryTreeSuite"))
+//  def this() = this(ActorSystem("BinaryTreeSuite"))
+  def this() = this(ActorSystem("BinaryTreeSuite", ConfigFactory.parseString( """akka {
+         loglevel = "DEBUG"
+         actor {
+           debug {
+             receive = on
+             lifecycle = off
+           }
+         }
+       }""").withFallback(ConfigFactory.load())))
 
   override def afterAll: Unit = system.shutdown()
 
@@ -76,14 +95,49 @@ class BinaryTreeSuite(_system: ActorSystem) extends Tester(_system)
     expectMsg(ContainsResult(3, true))
   }
 
+  test("proper inserts and lookups with GC") {
+    val topNode = system.actorOf(Props[BinaryTreeSet])
+
+    topNode ! Contains(testActor, id = 1, 1)
+    expectMsg(ContainsResult(1, false))
+
+    topNode ! Insert(testActor, id = 2, 1)
+    expectMsg(OperationFinished(2))
+
+    topNode ! Contains(testActor, id = 3, 1)
+    expectMsg(ContainsResult(3, true))
+
+    topNode ! GC
+
+    topNode ! Contains(testActor, id = 4, 1)
+    expectMsg(ContainsResult(4, true))
+  }
+
+  test("proper inserts and lookups with GC 2") {
+    val topNode = system.actorOf(Props[BinaryTreeSet])
+    topNode ! Insert(testActor, id = 2, 1)
+    expectMsg(OperationFinished(2))
+
+    topNode ! Contains(testActor, id = 3, 1)
+    expectMsg(ContainsResult(3, true))
+
+    topNode ! Remove(testActor, id = 4, 1)
+    expectMsg(OperationFinished(4))
+
+    topNode ! GC
+
+    topNode ! Contains(testActor, id = 5, 1)
+    expectMsg(ContainsResult(5, false))
+  }
+
   test("proper inserts and lookups 2") {
     val requester = TestProbe()
     val requesterRef = requester.ref
 
     val ops = List(
-      Insert(requesterRef, 0, 36)
+      Insert(requesterRef, 0, 36),
 //      Contains(requesterRef, 1, 59),
-//      Insert(requesterRef, 2, 80),
+      Insert(requesterRef, 2, 80),
 //      Remove(requesterRef, 3, 19),
 //      Remove(requesterRef, 4, 68),
 //      Remove(requesterRef, 5, 4),
@@ -97,13 +151,13 @@ class BinaryTreeSuite(_system: ActorSystem) extends Tester(_system)
 //      Remove(requesterRef, 13, 91),
 //      Contains(requesterRef, 14, 18),
 //      Remove(requesterRef, 15, 91),
-//      Contains(requesterRef, 16, 80)
+      Contains(requesterRef, 16, 80)
     )
 
     val expected = List(
-      OperationFinished(0)
+      OperationFinished(0),
 //      ContainsResult(1, false),
-//      OperationFinished(2),
+      OperationFinished(2),
 //      OperationFinished(3),
 //      OperationFinished(4),
 //      OperationFinished(5),
@@ -117,7 +171,7 @@ class BinaryTreeSuite(_system: ActorSystem) extends Tester(_system)
 //      OperationFinished(13),
 //      ContainsResult(14, false),
 //      OperationFinished(15),
-//      ContainsResult(16, true)
+      ContainsResult(16, true)
     )
 
     verify(requester, ops, expected)
@@ -152,29 +206,44 @@ class BinaryTreeSuite(_system: ActorSystem) extends Tester(_system)
     def randomOperations(requester: ActorRef, count: Int): Seq[Operation] = {
       def randomElement: Int = rnd.nextInt(100)
       def randomOperation(requester: ActorRef, id: Int): Operation = rnd.nextInt(4) match {
-        case 0 => Insert(requester, id, randomElement)
-        case 1 => Insert(requester, id, randomElement)
-        case 2 => Contains(requester, id, randomElement)
-        case 3 => Remove(requester, id, randomElement)
+        case 0 => {
+          Insert(requester, id, randomElement)
+        }
+        case 1 => {
+          Insert(requester, id, randomElement)
+        }
+        case 2 => {
+          Contains(requester, id, randomElement)
+        }
+        case 3 => {
+          Remove(requester, id, randomElement)
+        }
       }
 
-      for (seq <- 0 until count) yield randomOperation(requester, seq)
+      for (seq <- 0 until count) yield {
+        randomOperation(requester, seq)
+      }
     }
 
     def referenceReplies(operations: Seq[Operation]): Seq[OperationReply] = {
       var referenceSet = Set.empty[Int]
       def replyFor(op: Operation): OperationReply = op match {
-        case Insert(_, seq, elem) =>
+        case Insert(_, seq, elem) => {
           referenceSet = referenceSet + elem
           OperationFinished(seq)
-        case Remove(_, seq, elem) =>
+        }
+        case Remove(_, seq, elem) => {
           referenceSet = referenceSet - elem
           OperationFinished(seq)
-        case Contains(_, seq, elem) =>
+        }
+        case Contains(_, seq, elem) => {
           ContainsResult(seq, referenceSet(elem))
+        }
       }
 
-      for (op <- operations) yield replyFor(op)
+      for (op <- operations) yield {
+        replyFor(op)
+      }
     }
 
     val requester = TestProbe()
@@ -196,29 +265,44 @@ class BinaryTreeSuite(_system: ActorSystem) extends Tester(_system)
     def randomOperations(requester: ActorRef, count: Int): Seq[Operation] = {
       def randomElement: Int = rnd.nextInt(100)
       def randomOperation(requester: ActorRef, id: Int): Operation = rnd.nextInt(4) match {
-        case 0 => Insert(requester, id, randomElement)
-        case 1 => Insert(requester, id, randomElement)
-        case 2 => Contains(requester, id, randomElement)
-        case 3 => Remove(requester, id, randomElement)
+        case 0 => {
+          Insert(requester, id, randomElement)
+        }
+        case 1 => {
+          Insert(requester, id, randomElement)
+        }
+        case 2 => {
+          Contains(requester, id, randomElement)
+        }
+        case 3 => {
+          Remove(requester, id, randomElement)
+        }
       }
 
-      for (seq <- 0 until count) yield randomOperation(requester, seq)
+      for (seq <- 0 until count) yield {
+        randomOperation(requester, seq)
+      }
     }
 
     def referenceReplies(operations: Seq[Operation]): Seq[OperationReply] = {
       var referenceSet = Set.empty[Int]
       def replyFor(op: Operation): OperationReply = op match {
-        case Insert(_, seq, elem) =>
+        case Insert(_, seq, elem) => {
           referenceSet = referenceSet + elem
           OperationFinished(seq)
-        case Remove(_, seq, elem) =>
+        }
+        case Remove(_, seq, elem) => {
           referenceSet = referenceSet - elem
           OperationFinished(seq)
-        case Contains(_, seq, elem) =>
+        }
+        case Contains(_, seq, elem) => {
           ContainsResult(seq, referenceSet(elem))
+        }
       }
 
-      for (op <- operations) yield replyFor(op)
+      for (op <- operations) yield {
+        replyFor(op)
+      }
     }
 
     val requester = TestProbe()
@@ -230,7 +314,9 @@ class BinaryTreeSuite(_system: ActorSystem) extends Tester(_system)
 
     ops foreach { op =>
       topNode ! op
-      if (rnd.nextDouble() < 0.1) topNode ! GC
+      if (rnd.nextDouble() < 0.1) {
+        topNode ! GC
+      }
     }
     receiveN(requester, ops, expectedReplies)
   }
